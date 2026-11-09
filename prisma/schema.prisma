@@ -1,0 +1,396 @@
+// Matheus Automóveis — modelo de dados compartilhado entre loja pública e painel administrativo.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Usuários e acesso ───────────────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+  SELLER
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  name                String
+  email               String    @unique
+  phone               String?
+  passwordHash        String
+  role                Role      @default(SELLER)
+  /// Permissões adicionais concedidas individualmente (além das do perfil)
+  extraPermissions    String[]  @default([])
+  /// Permissões removidas individualmente (sobrepõem o perfil)
+  revokedPermissions  String[]  @default([])
+  active              Boolean   @default(true)
+  /// Incrementado ao redefinir senha/desativar para invalidar sessões existentes
+  sessionVersion      Int       @default(0)
+  mustChangePassword  Boolean   @default(false)
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  assignedQuotes   Quote[]           @relation("QuoteAssignee")
+  quoteEvents      QuoteEvent[]
+  vehiclesCreated  Vehicle[]         @relation("VehicleCreatedBy")
+  vehiclesSold     Vehicle[]         @relation("VehicleSoldBy")
+  movements        VehicleMovement[]
+  activityLogs     ActivityLog[]
+
+  @@index([role, active])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  summary   String
+  details   Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@index([userId])
+}
+
+// ─────────────────────────────── Catálogo ───────────────────────────────
+
+model Brand {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  slug      String         @unique
+  logoUrl   String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  models    VehicleModel[]
+  vehicles  Vehicle[]
+}
+
+model VehicleModel {
+  id         String    @id @default(cuid())
+  name       String
+  slug       String
+  brandId    String
+  brand      Brand     @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  vehicles   Vehicle[]
+
+  @@unique([brandId, slug])
+}
+
+model Category {
+  id        String         @id @default(cuid())
+  name      String         @unique
+  slug      String         @unique
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  models    VehicleModel[]
+  vehicles  Vehicle[]
+}
+
+// ─────────────────────────────── Veículos ───────────────────────────────
+
+enum VehicleCondition {
+  NEW
+  USED
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+}
+
+enum FuelType {
+  FLEX
+  GASOLINE
+  ETHANOL
+  DIESEL
+  HYBRID
+  ELECTRIC
+  GNV
+}
+
+enum Transmission {
+  MANUAL
+  AUTOMATIC
+  CVT
+  AUTOMATED
+  DCT
+}
+
+model Vehicle {
+  id                 String           @id @default(cuid())
+  slug               String           @unique
+  internalCode       String           @unique
+
+  brandId            String
+  brand              Brand            @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  modelId            String
+  model              VehicleModel     @relation(fields: [modelId], references: [id], onDelete: Restrict)
+  categoryId         String?
+  category           Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  version            String
+  manufactureYear    Int
+  modelYear          Int
+  condition          VehicleCondition @default(USED)
+  mileage            Int              @default(0)
+  /// Campo privado: nunca exibir na loja pública
+  plate              String?
+
+  price              Decimal          @db.Decimal(12, 2)
+  promoPrice         Decimal?         @db.Decimal(12, 2)
+  acceptsTrade       Boolean          @default(true)
+  financingAvailable Boolean          @default(true)
+  status             VehicleStatus    @default(AVAILABLE)
+
+  engine             String?
+  power              String?
+  fuel               FuelType         @default(FLEX)
+  transmission       Transmission     @default(MANUAL)
+  steering           String?
+  drivetrain         String?
+  doors              Int?
+  seats              Int?
+  color              String?
+  consumption        String?
+  features           String[]         @default([])
+
+  description        String?
+  /// Campo privado
+  internalNotes      String?
+  highlights         String[]         @default([])
+  conservation       String?
+
+  published          Boolean          @default(false)
+  featured           Boolean          @default(false)
+  isOffer            Boolean          @default(false)
+  offerLabel         String?
+  displayOrder       Int              @default(0)
+  views              Int              @default(0)
+
+  publishedAt        DateTime?
+  soldAt             DateTime?
+  soldPrice          Decimal?         @db.Decimal(12, 2)
+  soldById           String?
+  soldBy             User?            @relation("VehicleSoldBy", fields: [soldById], references: [id], onDelete: SetNull)
+  createdById        String?
+  createdBy          User?            @relation("VehicleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  images             VehicleImage[]
+  movements          VehicleMovement[]
+  quotes             Quote[]
+  banners            Banner[]
+
+  @@index([published, status])
+  @@index([brandId, modelId])
+  @@index([featured])
+  @@index([createdAt])
+}
+
+model VehicleImage {
+  id        String   @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  url       String
+  /// Identificador no provedor (Cloudinary public_id ou caminho local)
+  storageKey String?
+  width     Int?
+  height    Int?
+  /// A imagem de menor ordem é a imagem principal
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId, order])
+}
+
+enum MovementType {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  PUBLISHED
+  UNPUBLISHED
+  FEATURED
+  UNFEATURED
+  PRICE_CHANGED
+  DUPLICATED
+  SOLD
+}
+
+model VehicleMovement {
+  id         String         @id @default(cuid())
+  vehicleId  String
+  vehicle    Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  type       MovementType
+  fromStatus VehicleStatus?
+  toStatus   VehicleStatus?
+  note       String?
+  userId     String?
+  user       User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime       @default(now())
+
+  @@index([vehicleId, createdAt])
+  @@index([type, createdAt])
+}
+
+// ─────────────────────────────── Orçamentos ───────────────────────────────
+
+enum QuoteStatus {
+  NEW
+  IN_PROGRESS
+  AWAITING_RETURN
+  PROPOSAL_SENT
+  NEGOTIATION
+  FINISHED
+  CANCELED
+}
+
+enum QuoteSource {
+  FORM
+  INTEREST
+  WHATSAPP
+}
+
+model Quote {
+  id             String       @id @default(cuid())
+  protocol       String       @unique
+  name           String
+  phone          String
+  email          String
+  /// Apenas dígitos. Opcional no banco para preservar solicitações antigas; obrigatório no formulário.
+  cpf            String?
+  birthDate      DateTime?    @db.Date
+  vehicleId      String?
+  vehicle        Vehicle?     @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  /// Snapshot do veículo no momento da solicitação
+  vehicleLabel   String?
+  message        String?
+  wantsFinancing Boolean      @default(false)
+  hasTradeIn     Boolean      @default(false)
+  tradeInBrand   String?
+  tradeInModel   String?
+  tradeInYear    Int?
+  tradeInMileage Int?
+  tradeInNotes   String?
+  source         QuoteSource  @default(FORM)
+  status         QuoteStatus  @default(NEW)
+  convertedToSale Boolean     @default(false)
+  assignedToId   String?
+  assignedTo     User?        @relation("QuoteAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  consentAt      DateTime?
+  ip             String?
+  closedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  events         QuoteEvent[]
+
+  @@index([status, createdAt])
+  @@index([assignedToId])
+  @@index([createdAt])
+}
+
+enum QuoteEventType {
+  CREATED
+  STATUS_CHANGED
+  NOTE
+  ASSIGNED
+  CONTACT
+}
+
+model QuoteEvent {
+  id         String         @id @default(cuid())
+  quoteId    String
+  quote      Quote          @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  type       QuoteEventType
+  fromStatus QuoteStatus?
+  toStatus   QuoteStatus?
+  note       String?
+  userId     String?
+  user       User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime       @default(now())
+
+  @@index([quoteId, createdAt])
+}
+
+// ─────────────────────────────── Conteúdo do site ───────────────────────────────
+
+model Banner {
+  id        String   @id @default(cuid())
+  title     String
+  subtitle  String?
+  imageUrl  String
+  ctaLabel  String?
+  ctaHref   String?
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  active    Boolean  @default(true)
+  order     Int      @default(0)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Testimonial {
+  id        String   @id @default(cuid())
+  name      String
+  city      String?
+  vehicle   String?
+  text      String
+  rating    Int      @default(5)
+  active    Boolean  @default(true)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Configurações gerais e textos institucionais (registro único, id = "default")
+model SiteSettings {
+  id              String   @id @default("default")
+  storeName       String   @default("Matheus Automóveis")
+  tagline         String?
+  whatsapp        String?
+  phone           String?
+  email           String?
+  address         String?
+  city            String?
+  mapsUrl         String?
+  businessHours   String?
+  instagram       String?
+  facebook        String?
+  youtube         String?
+  cnpj            String?
+  heroTitle       String?
+  heroSubtitle    String?
+  heroImageUrl    String?
+  aboutTitle      String?
+  aboutText       String?
+  aboutImageUrl   String?
+  /// Lista de diferenciais: [{ title, description, icon }]
+  differentials   Json?
+  offersTitle     String?
+  offersSubtitle  String?
+  featuredTitle   String?
+  latestTitle     String?
+  whatsappMessage String?
+  updatedAt       DateTime @updatedAt
+}

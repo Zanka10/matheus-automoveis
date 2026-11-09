@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+.env
+.env.local
+*.tsbuildinfo
+next-env.d.ts
+/public/uploads/*
+!/public/uploads/.gitkeep
+/.pgdata
+.pg.log
+/uploads/*
+!/uploads/.gitkeep
+.next-start.log
